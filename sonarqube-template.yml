@@ -180,6 +180,10 @@ objects:
           volumeMounts:
           - name: sonar-data
             mountPath: /opt/sonarqube/data
+          - name: sonar-conf
+            mountPath: /opt/sonarqube/conf
+          - name: sonar-extensions
+            mountPath: /opt/sonarqube/extensions
           readinessProbe:
               httpGet:
                 path: /
@@ -208,6 +212,12 @@ objects:
         - name: sonar-data
           persistentVolumeClaim:
             claimName: sonar-data
+        - name: sonar-conf
+          persistentVolumeClaim:
+            claimName: sonar-conf
+        - name: sonar-extensions
+          persistentVolumeClaim:
+            claimName: sonar-extensions
     test: false
     triggers:
     - type: ConfigChange
@@ -240,6 +250,26 @@ objects:
   apiVersion: v1
   metadata:
     name: sonar-data
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${SONAR_VOLUME_CAPACITY}
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: sonar-conf
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${SONAR_VOLUME_CAPACITY}
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: sonar-extensions
   spec:
     accessModes:
       - ReadWriteOnce
