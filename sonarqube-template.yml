@@ -1,0 +1,300 @@
+kind: Template
+apiVersion: v1
+metadata:
+  annotations:
+    description: Sonarqube Server
+    tags: instant-app,sonarqube,java
+  name: sonar
+objects:
+- kind: ServiceAccount
+  apiVersion: v1
+  metadata:
+    creationTimestamp: null
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+- kind: Service
+  apiVersion: v1
+  metadata:
+    annotations:
+      description: Exposes the database server
+    name: ${APPLICATION_NAME}-postgresql
+  spec:
+    ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+    selector:
+      name: ${APPLICATION_NAME}-postgresql
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    annotations:
+      description: Defines how to deploy the database
+    name: ${APPLICATION_NAME}-postgresql
+  spec:
+    replicas: 1
+    selector:
+      name: ${APPLICATION_NAME}-postgresql
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${APPLICATION_NAME}-postgresql
+        name: ${APPLICATION_NAME}-postgresql
+      spec:
+        serviceAccountName: ${APPLICATION_NAME}
+        containers:
+        - env:
+          - name: POSTGRESQL_USER
+            value: ${DATABASE_USER}
+          - name: POSTGRESQL_PASSWORD
+            value: ${DATABASE_PASSWORD}
+          - name: POSTGRESQL_DATABASE
+            value: ${DATABASE_NAME}
+          - name: POSTGRESQL_MAX_CONNECTIONS
+            value: ${DATABASE_MAX_CONNECTIONS}
+          - name: POSTGRESQL_SHARED_BUFFERS
+            value: ${DATABASE_SHARED_BUFFERS}
+          - name: POSTGRESQL_ADMIN_PASSWORD
+            value: ${DATABASE_ADMIN_PASSWORD}
+          image: ' '
+          livenessProbe:
+            initialDelaySeconds: 90
+            tcpSocket:
+              port: 5432
+            timeoutSeconds: 30
+          name: postgresql
+          ports:
+          - containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+              - /bin/sh
+              - -i
+              - -c
+              - psql -h 127.0.0.1 -U ${POSTGRESQL_USER} -q -d ${POSTGRESQL_DATABASE} -c 'SELECT 1'
+            initialDelaySeconds: 30
+            timeoutSeconds: 30
+          resources:
+            limits:
+              memory: 512Mi
+          volumeMounts:
+          - mountPath: /var/lib/pgsql/data
+            name: sonar-postgres-data
+        volumes:
+        - name: sonar-postgres-data
+          persistentVolumeClaim:
+            claimName: sonar-postgres-data
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - postgresql
+        from:
+          kind: ImageStreamTag
+          name: postgresql:9.5
+          namespace: openshift
+      type: ImageChange
+    - type: ConfigChange
+- kind: Service
+  apiVersion: v1
+  metadata:
+    annotations:
+      description: The Sonar server's http port
+      service.alpha.openshift.io/dependencies: '[{"name":"${APPLICATION_NAME}-postgresql","namespace":"","kind":"Service"}]'
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    ports:
+    - name: 9000-tcp
+      port: 9000
+      protocol: TCP
+      targetPort: 9000
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+    sessionAffinity: None
+    type: ClusterIP
+  status:
+    loadBalancer: {}
+- kind: Route
+  apiVersion: v1
+  id: ${APPLICATION_NAME}-http
+  metadata:
+    annotations:
+      description: Route for application's http service.
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    host: ${HOSTNAME}
+    to:
+      name: ${APPLICATION_NAME}
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    replicas: 1
+    selector:
+      app: ${APPLICATION_NAME}
+      deploymentconfig: ${APPLICATION_NAME}
+    strategy:
+      resources: {}
+      rollingParams:
+        intervalSeconds: 1
+        maxSurge: 25%
+        maxUnavailable: 25%
+        timeoutSeconds: 600
+        updatePeriodSeconds: 1
+      type: Rolling
+    template:
+      metadata:
+        creationTimestamp: null
+        labels:
+          app: ${APPLICATION_NAME}
+          deploymentconfig: ${APPLICATION_NAME}
+      spec:
+        serviceAccountName: ${APPLICATION_NAME}
+        containers:
+        - image: " "
+          env:
+            - name: SONARQUBE_JDBC_USERNAME
+              value: ${DATABASE_USER}
+            - name: SONARQUBE_JDBC_PASSWORD
+              value: ${DATABASE_PASSWORD}
+            - name: SONARQUBE_JDBC_URL
+              value: "jdbc:postgresql://${APPLICATION_NAME}-postgresql/${DATABASE_NAME}"
+          imagePullPolicy: Always
+          name: ${APPLICATION_NAME}
+          ports:
+          - containerPort: 9000
+            protocol: TCP
+          resources: {}
+          terminationMessagePath: /dev/termination-log
+          volumeMounts:
+          - name: sonar-data
+            mountPath: /opt/sonarqube/data
+          readinessProbe:
+              httpGet:
+                path: /
+                port: 9000
+                scheme: HTTP
+              initialDelaySeconds: 90
+              timeoutSeconds: 30
+              periodSeconds: 20
+              successThreshold: 1
+              failureThreshold: 3
+          livenessProbe:
+              httpGet:
+                path: /
+                port: 9000
+                scheme: HTTP
+              initialDelaySeconds: 90
+              timeoutSeconds: 30
+              periodSeconds: 10
+              successThreshold: 1
+              failureThreshold: 3
+        dnsPolicy: ClusterFirst
+        restartPolicy: Always
+        securityContext: {}
+        terminationGracePeriodSeconds: 90
+        volumes:
+        - name: sonar-data
+          persistentVolumeClaim:
+            claimName: sonar-data
+    test: false
+    triggers:
+    - type: ConfigChange
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - ${APPLICATION_NAME}
+        from:
+          kind: ImageStreamTag
+          name: ${APPLICATION_NAME}:${SONAR_VERSION}
+      type: ImageChange
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    labels:
+      app: ${APPLICATION_NAME}
+    name: ${APPLICATION_NAME}
+  spec:
+    tags:
+    - name: "${SONAR_VERSION}"
+      from:
+        kind: DockerImage
+        name: docker.io/victornc83/openshift-sonarqube:${SONAR_VERSION}
+      importPolicy: {}
+      annotations:
+        description: Sonarqube server docker image
+        tags: sonar,java
+        version: "${SONAR_VERSION}"
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: sonar-data
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${SONAR_VOLUME_CAPACITY}
+- kind: PersistentVolumeClaim
+  apiVersion: v1
+  metadata:
+    name: sonar-postgres-data
+  spec:
+    accessModes:
+      - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${DB_VOLUME_CAPACITY}
+parameters:
+- description: The name for the application.
+  name: APPLICATION_NAME
+  required: true
+  value: sonar
+- description: 'Custom hostname for http service route.  Leave blank for default hostname, e.g.: <application-name>-<project>.<default-domain-suffix>'
+  name: HOSTNAME
+  required: false
+- description: Volume space available for data, e.g. 512Mi, 2Gi
+  name: SONAR_VOLUME_CAPACITY
+  required: true
+  value: 1Gi
+- description: Volume space available for postregs data, e.g. 512Mi, 2Gi
+  name: DB_VOLUME_CAPACITY
+  required: true
+  value: 1Gi
+- displayName: Database Username
+  from: sonar
+  value: sonar
+  name: DATABASE_USER
+- displayName: Database Password
+  from: '[a-zA-Z0-9]{8}'
+  value: sonar
+  name: DATABASE_PASSWORD
+- displayName: Database Name
+  name: DATABASE_NAME
+  value: sonar
+- displayName: Database Admin Password
+  from: '[a-zA-Z0-9]{8}'
+  generate: expression
+  name: DATABASE_ADMIN_PASSWORD
+- displayName: Maximum Database Connections
+  name: DATABASE_MAX_CONNECTIONS
+  value: "100"
+- displayName: Shared Buffer Amount
+  name: DATABASE_SHARED_BUFFERS
+  value: 12MB
+- name: SONAR_VERSION
+  displayName: Sonarqube Version
+  description: 'Version of the Sonar container image to be used (check the available version https://hub.docker.com/r/victornc83/openshift-sonarqube/tags)'
+  value: "6.4"
+  required: true
