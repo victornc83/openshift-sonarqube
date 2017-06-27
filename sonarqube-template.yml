@@ -296,5 +296,5 @@ parameters:
 - name: SONAR_VERSION
   displayName: Sonarqube Version
   description: 'Version of the Sonar container image to be used (check the available version https://hub.docker.com/r/victornc83/openshift-sonarqube/tags)'
-  value: "6.4"
+  value: "6.1"
   required: true

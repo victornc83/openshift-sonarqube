@@ -1,7 +1,7 @@
 FROM openjdk:8-alpine
 MAINTAINER Victor Nieto <victornc83@gmail.com>
 
-ENV SONAR_VERSION=6.4 \
+ENV SONAR_VERSION=6.1 \
     SONARQUBE_HOME=/opt/sonarqube \
     SONARQUBE_JDBC_USERNAME=sonar \
     SONARQUBE_JDBC_PASSWORD=sonar \
